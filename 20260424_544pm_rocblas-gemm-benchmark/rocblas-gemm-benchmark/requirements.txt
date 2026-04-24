@@ -1,6 +1,0 @@
-# Pinned for reproducibility across ROCm driver upgrades where Python
-# environments may differ. Do not unpin without also running the full
-# sweep + tests on the target MI300X host to confirm nothing regresses.
-
-pytest==8.3.4
-PyYAML==6.0.2
