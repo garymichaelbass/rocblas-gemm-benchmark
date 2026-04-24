@@ -18,4 +18,5 @@ venv/
 *.swp
 .DS_Store
 
+# Personal notes
 Gary_Instructions.txt
