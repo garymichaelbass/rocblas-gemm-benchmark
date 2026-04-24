@@ -1,0 +1,19 @@
+# Generated artifacts — never commit
+logs/
+results/
+local/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+.env
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

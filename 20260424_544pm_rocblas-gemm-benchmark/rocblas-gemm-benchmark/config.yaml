@@ -1,0 +1,32 @@
+# ---------------------------------------------------------------------------
+# rocBLAS GEMM benchmark thresholds for MI300X (gfx942).
+#
+# UNITS: GFLOPS (NOT TFLOPS), to match rocblas-bench output units directly.
+#        Multiply a TFLOPS figure by 1000 to convert.
+#
+# MI300X published dense matrix-engine peaks (no sparsity):
+#     FP16 / BF16  :  1,307,400 GFLOPS    (1307.4 TFLOPS)
+#     TF32         :    653,700 GFLOPS    ( 653.7 TFLOPS)
+#     FP32         :    163,400 GFLOPS    ( 163.4 TFLOPS)
+#
+# The thresholds below are PRACTICAL floors for large square GEMMs
+# (M = N = K >= 4096), set at ~70% of peak to account for:
+#   - memory-bandwidth effects at large tile counts
+#   - kernel-dispatch and library overhead
+#   - thermal steady-state vs. burst
+#
+# These are floors, not targets: regressions below them indicate a real
+# problem. Tune upward only after observing sustained better numbers from
+# a warmed, well-powered MI300X.
+# ---------------------------------------------------------------------------
+
+thresholds:
+  # Median GFLOPS across repeated runs must be >= these values.
+  gflops:
+    f16:  900000     # ~69% of 1,307,400 peak
+    bf16: 900000     # ~69% of 1,307,400 peak
+    f32:  110000     # ~67% of   163,400 peak
+
+  # Documentary only — the actual check lives as a fixed constant in
+  # tests/test_gemm_correctness.py to prevent accidental loosening.
+  error_norm: 1.0e-3
