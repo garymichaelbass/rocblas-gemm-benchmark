@@ -8,8 +8,14 @@
 # and once after the full sweep and saved to sidecar files (GPU state is a
 # sweep-level observation, not per-run).
 #
+# Precision/compute-type combinations:
+#   f16   : input f16, compute f16  (MI300X matrix engine fast path; ~1.3 PFLOPS peak)
+#   bf16  : input bf16, compute f32 (the ONLY supported bf16 path in rocBLAS;
+#                                    bf16/bf16 compute is invalid)
+#   f32   : input f32, compute f32  (~163 TFLOPS peak)
+#
 # Required (for reproducibility in logs, not for function):
-#   ROCM_VERSION    e.g. "6.1.0"
+#   ROCM_VERSION    e.g. "7.2.0"
 #
 # Optional env:
 #   ROCBLAS_BENCH   path to rocblas-bench binary
@@ -70,6 +76,7 @@ SWEEP_HEADER="${LOG_DIR}/sweep_header_${SWEEP_TS}.txt"
   echo "cold_iterations=${COLD_ITERATIONS}"
   echo "transpose_a=${TRANSPOSE_A}"
   echo "transpose_b=${TRANSPOSE_B}"
+  echo "ld_library_path=${LD_LIBRARY_PATH:-}"
   echo "kernel=$(uname -a)"
 } > "${SWEEP_HEADER}"
 log "Sweep header written: ${SWEEP_HEADER}"
@@ -87,14 +94,29 @@ fi
 PRECISIONS=(f16 bf16 f32)
 SIZES=(4096 8192 16384)
 
-# Map our short precision names → rocblas-bench -r flag values.
-# -r sets compute_type and all of {a,b,c,d}_type to the same value, which is
-# exactly what the spec calls for (uniform precision sweep).
-precision_flag() {
+# Map our short precision name → array of rocblas-bench flags. Done as
+# arrays (not strings) so each token is its own argv element — no quoting
+# pitfalls.
+#
+# Function-name choice (`-f gemm` vs `-f gemm_ex`):
+#   * The plain `gemm` function only accepts homogeneous types in
+#     {f16, f32, f64, c32, c64}. It does NOT accept bf16 inputs and will
+#     fail with "Invalid combination --function gemm --a_type bf16_r".
+#   * `gemm_ex` is the extended function that accepts split a/b/c/d/compute
+#     types and supports bf16 inputs with f32 accumulate (the only valid
+#     bf16 path in rocBLAS).
+# So: f16 + f32 use `gemm` (proven, fast path); bf16 uses `gemm_ex`.
+precision_flags() {
   case "$1" in
-    f16)  echo "f16_r"  ;;
-    bf16) echo "bf16_r" ;;
-    f32)  echo "f32_r"  ;;
+    f16)
+      echo "-f gemm -r f16_r"
+      ;;
+    bf16)
+      echo "-f gemm_ex --a_type bf16_r --b_type bf16_r --c_type bf16_r --d_type bf16_r --compute_type f32_r"
+      ;;
+    f32)
+      echo "-f gemm -r f32_r"
+      ;;
     *) die "unknown precision: $1" ;;
   esac
 }
@@ -103,7 +125,8 @@ total=$(( ${#PRECISIONS[@]} * ${#SIZES[@]} * REPEATS ))
 run=0
 
 for prec in "${PRECISIONS[@]}"; do
-  r_flag="$(precision_flag "${prec}")"
+  # shellcheck disable=SC2206 — intentional word-splitting of controlled, fixed strings
+  prec_flag_array=( $(precision_flags "${prec}") )
   for size in "${SIZES[@]}"; do
     for ((i = 1; i <= REPEATS; i++)); do
       run=$((run + 1))
@@ -115,12 +138,10 @@ for prec in "${PRECISIONS[@]}"; do
       log "[${run}/${total}] prec=${prec} M=N=K=${size} run=${i}/${REPEATS} → ${log_file##*/}"
 
       # -v 1 enables verification; without it rocblas-error is NOT emitted.
-      # NOTE: The transpose flag is --transposeA / --transposeB in current
-      # rocBLAS (6.x). Older (pre-5.0) builds used --transA / --transB; if
-      # using an older rocBLAS, update these flags accordingly.
+      # NOTE: --transposeA / --transposeB are the modern flag names. Older
+      # (< rocBLAS 5.0) builds used --transA / --transB.
       if ! "${ROCBLAS_BENCH}" \
-             -f gemm \
-             -r "${r_flag}" \
+             "${prec_flag_array[@]}" \
              --transposeA "${TRANSPOSE_A}" \
              --transposeB "${TRANSPOSE_B}" \
              -m "${size}" -n "${size}" -k "${size}" \
